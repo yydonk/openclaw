@@ -159,7 +159,7 @@ describe("loadPluginManifestRegistry", () => {
     expect(countDuplicateWarnings(loadRegistry(candidates))).toBe(1);
   });
 
-  it("reports explicit installed globals as the effective duplicate winner", () => {
+  it("suppresses duplicate warning when npm-installed global plugin overrides bundled version", () => {
     const bundledDir = makeTempDir();
     const globalDir = makeTempDir();
     const manifest = { id: "zalouser", configSchema: { type: "object" } };
@@ -192,11 +192,47 @@ describe("loadPluginManifestRegistry", () => {
       ],
     });
 
-    expect(
-      registry.diagnostics.some((diag) =>
-        diag.message.includes("bundled plugin will be overridden by global plugin"),
-      ),
-    ).toBe(true);
+    // No warning should fire for an intentional npm-install override of a bundled plugin.
+    expect(countDuplicateWarnings(registry)).toBe(0);
+    // The npm-installed (global) version should still win over the bundled one.
+    expect(registry.plugins[0]?.origin).toBe("global");
+  });
+
+  it("still emits duplicate warning when global install overrides a non-bundled plugin", () => {
+    const globalDir1 = makeTempDir();
+    const globalDir2 = makeTempDir();
+    const manifest = { id: "feishu", configSchema: { type: "object" } };
+    writeManifest(globalDir1, manifest);
+    writeManifest(globalDir2, manifest);
+
+    const registry = loadPluginManifestRegistry({
+      cache: false,
+      config: {
+        plugins: {
+          installs: {
+            feishu: {
+              source: "npm",
+              installPath: globalDir1,
+            },
+          },
+        },
+      },
+      candidates: [
+        createPluginCandidate({
+          idHint: "feishu",
+          rootDir: globalDir1,
+          origin: "global",
+        }),
+        createPluginCandidate({
+          idHint: "feishu",
+          rootDir: globalDir2,
+          origin: "global",
+        }),
+      ],
+    });
+
+    // Warning should still fire when two global plugins conflict (not a bundled override).
+    expect(countDuplicateWarnings(registry)).toBe(1);
   });
 
   it("preserves provider auth env metadata from plugin manifests", () => {

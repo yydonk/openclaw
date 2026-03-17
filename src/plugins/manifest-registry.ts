@@ -384,26 +384,43 @@ export function loadPluginManifestRegistry(params: {
         }
         continue;
       }
-      diagnostics.push({
-        level: "warn",
+      const candidateRank = resolveDuplicatePrecedenceRank({
         pluginId: manifest.id,
-        source: candidate.source,
-        message:
-          resolveDuplicatePrecedenceRank({
-            pluginId: manifest.id,
-            candidate,
-            config,
-            env,
-          }) <
-          resolveDuplicatePrecedenceRank({
-            pluginId: manifest.id,
-            candidate: existing.candidate,
-            config,
-            env,
-          })
-            ? `duplicate plugin id detected; ${existing.candidate.origin} plugin will be overridden by ${candidate.origin} plugin (${candidate.source})`
-            : `duplicate plugin id detected; ${candidate.origin} plugin will be overridden by ${existing.candidate.origin} plugin (${candidate.source})`,
+        candidate,
+        config,
+        env,
       });
+      const existingRank = resolveDuplicatePrecedenceRank({
+        pluginId: manifest.id,
+        candidate: existing.candidate,
+        config,
+        env,
+      });
+      // Suppress diagnostic when a tracked npm install intentionally overrides a bundled
+      // plugin. This is the expected flow after `openclaw plugins install` and should not
+      // surface as a warning — the user opted in by running the install command.
+      const winningCandidate = candidateRank < existingRank ? candidate : existing.candidate;
+      const losingCandidate = candidateRank < existingRank ? existing.candidate : candidate;
+      const isIntentionalInstallOverride =
+        winningCandidate.origin === "global" &&
+        losingCandidate.origin === "bundled" &&
+        matchesInstalledPluginRecord({
+          pluginId: manifest.id,
+          candidate: winningCandidate,
+          config,
+          env,
+        });
+      if (!isIntentionalInstallOverride) {
+        diagnostics.push({
+          level: "warn",
+          pluginId: manifest.id,
+          source: candidate.source,
+          message:
+            candidateRank < existingRank
+              ? `duplicate plugin id detected; ${existing.candidate.origin} plugin will be overridden by ${candidate.origin} plugin (${candidate.source})`
+              : `duplicate plugin id detected; ${candidate.origin} plugin will be overridden by ${existing.candidate.origin} plugin (${candidate.source})`,
+        });
+      }
     } else {
       seenIds.set(manifest.id, { candidate, recordIndex: records.length });
     }
